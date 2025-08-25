@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tarot 桌面拖拉翻牌</title>
+  <style>
+    :root {
+      --card-w: 110px;
+      --card-h: 180px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      user-select: none;
+      background: radial-gradient(1000px 800px at 60% -10%, #165a16, #0d3e0f 60%, #072b09 100%);
+      overflow: hidden;
+    }
+    #table {
+      position: relative;
+      width: 100vw; height: 100vh;
+      overflow: hidden;
+    }
+    .toolbar {
+      position: fixed; inset: 12px auto auto 12px; z-index: 10000;
+      display: flex; gap: 8px; align-items: center;
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px; padding: 8px 10px;
+      color: #f0f7f0; font-size: 14px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    }
+    .toolbar button {
+      appearance: none; border: none; cursor: pointer;
+      padding: 8px 12px; border-radius: 10px;
+      background: rgba(255,255,255,0.15);
+      color: #f7fff7; font-weight: 600; letter-spacing: .2px;
+      transition: transform .06s ease, background .2s ease;
+    }
+    .toolbar button:hover { background: rgba(255,255,255,0.22); }
+    .toolbar button:active { transform: translateY(1px) scale(0.98); }
+
+    .hint {
+      position: fixed; right: 12px; top: 12px; z-index: 10000;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #e6f6e6; font-size: 13px; line-height: 1.4;
+      padding: 10px 12px; border-radius: 12px; max-width: 320px;
+    }
+
+    .card {
+      width: var(--card-w); height: var(--card-h);
+      position: absolute; left: 0; top: 0;
+      transform: rotate(var(--rot, 0deg));
+      transform-origin: center;
+      cursor: grab;
+      will-change: transform, left, top;
+    }
+    .card:active { cursor: grabbing; }
+
+    .inner {
+      position: relative; width: 100%; height: 100%;
+      transform-style: preserve-3d;
+      transition: transform .35s ease;
+      border-radius: 12px;
+    }
+    .card.face-down .inner { transform: rotateY(180deg); }
+
+    .face {
+      position: absolute; inset: 0;
+      border-radius: 12px;
+      backface-visibility: hidden;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.15) inset;
+    }
+
+    /* 牌面（正面） */
+    .front {
+      background: linear-gradient(160deg, #fdfcf9, #f1eee8 60%, #e6e2da);
+      border: 1px solid #c8c4bb;
+      display: grid; place-items: center;
+      padding: 8px;
+    }
+    .front .label {
+      font-weight: 800; text-align: center; color: #3b3a37;
+      font-size: 14px; line-height: 1.15;
+    }
+
+    /* 牌背（背面） */
+    .back {
+      transform: rotateY(180deg);
+      border: 1px solid #2a6f6f;
+      background:
+        radial-gradient(circle at 30% 30%, rgba(255,255,255,0.16), transparent 60%),
+        repeating-conic-gradient(from 0deg, #0e2f4a 0 15deg, #12415f 15deg 30deg);
+      display: grid; place-items: center;
+    }
+    .back .sigil {
+      width: 62%; height: 62%; border-radius: 50%;
+      background: radial-gradient(circle at 50% 45%, rgba(255,255,255,0.9), rgba(255,255,255,0.5) 35%, rgba(255,255,255,0.18) 65%, rgba(255,255,255,0.08) 80%, transparent 100%);
+      outline: 3px double rgba(255,255,255,0.6);
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.12) inset;
+    }
+
+    /* 小裝飾邊框 */
+    .front::before, .front::after {
+      content: ""; position: absolute; inset: 8px; border-radius: 10px;
+      border: 1px solid rgba(0,0,0,0.08);
+      pointer-events: none;
+    }
+    .front::after { inset: 14px; border-color: rgba(0,0,0,0.06); }
+
+    /* 卡片被拖曳時，取消翻轉動畫的延遲感 */
+    .dragging .inner { transition: transform .08s linear; }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button id="scatterBtn" title="隨機把牌散在桌面">隨機散牌</button>
+    <button id="stackBtn" title="把牌收成一疊">收成一疊</button>
+    <span style="opacity:.85">共 <strong id="count">78</strong> 張</span>
+  </div>
+  <div class="hint">
+    滑鼠拖曳可移動牌、雙擊牌可翻面。<br />
+    「隨機散牌」讓 78 張牌瞬間洗亂；「收成一疊」把牌疊回桌面中央。
+  </div>
+  <div id="table" aria-label="Tarot 操作桌面"></div>
+
+  <script>
+    // --- 牌組資料（78 張） ---
+    const majorArcana = [
+      '0 愚者','I 魔術師','II 女祭司','III 皇后','IV 皇帝','V 教皇','VI 戀人','VII 戰車',
+      'VIII 力量','IX 隱者','X 命運之輪','XI 正義','XII 吊人','XIII 死神','XIV 節制',
+      'XV 惡魔','XVI 高塔','XVII 星星','XVIII 月亮','XIX 太陽','XX 審判','XXI 世界'
+    ];
+    const suits = [
+      { name: '權杖', ranks: ['A','2','3','4','5','6','7','8','9','10','侍者','騎士','皇后','國王'] },
+      { name: '聖杯', ranks: ['A','2','3','4','5','6','7','8','9','10','侍者','騎士','皇后','國王'] },
+      { name: '寶劍', ranks: ['A','2','3','4','5','6','7','8','9','10','侍者','騎士','皇后','國王'] },
+      { name: '錢幣', ranks: ['A','2','3','4','5','6','7','8','9','10','侍者','騎士','皇后','國王'] },
+    ];
+    const minorArcana = suits.flatMap(s => s.ranks.map(r => `${s.name} ${r}`));
+    const deck = [...majorArcana, ...minorArcana]; // 22 + 56 = 78
+
+    const table = document.getElementById('table');
+    const scatterBtn = document.getElementById('scatterBtn');
+    const stackBtn = document.getElementById('stackBtn');
+    const countEl = document.getElementById('count');
+
+    let zCounter = 1;
+
+    function createCard(label, idx) {
+      const card = document.createElement('div');
+      card.className = 'card face-down';
+      card.dataset.index = idx;
+      card.style.left = '0px';
+      card.style.top = '0px';
+      card.style.setProperty('--rot', `${(Math.random()*6-3).toFixed(2)}deg`);
+
+      const inner = document.createElement('div');
+      inner.className = 'inner';
+
+      const front = document.createElement('div');
+      front.className = 'face front';
+      const labelEl = document.createElement('div');
+      labelEl.className = 'label';
+      labelEl.textContent = label;
+      front.appendChild(labelEl);
+
+      const back = document.createElement('div');
+      back.className = 'face back';
+      const sigil = document.createElement('div');
+      sigil.className = 'sigil';
+      back.appendChild(sigil);
+
+      inner.appendChild(front);
+      inner.appendChild(back);
+      card.appendChild(inner);
+
+      // 互動：雙擊翻面
+      card.addEventListener('dblclick', (e) => {
+        card.classList.toggle('face-down');
+      });
+
+      // 互動：拖曳
+      makeDraggable(card);
+      return card;
+    }
+
+    function makeDraggable(card) {
+      let startX=0, startY=0, offsetX=0, offsetY=0, moving=false;
+
+      card.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return; // 僅左鍵
+        e.preventDefault();
+        const rect = card.getBoundingClientRect();
+        const tableRect = table.getBoundingClientRect();
+        startX = e.clientX; startY = e.clientY;
+        offsetX = startX - rect.left; offsetY = startY - rect.top;
+        card.setPointerCapture(e.pointerId);
+        card.classList.add('dragging');
+        card.style.zIndex = (++zCounter).toString();
+
+        const onMove = (ev) => {
+          moving = true;
+          const w = rect.width, h = rect.height;
+          let x = ev.clientX - tableRect.left - offsetX;
+          let y = ev.clientY - tableRect.top - offsetY;
+          // 允許一點點超出邊界，避免邊緣很難拿到
+          const margin = 0.4; // 允許 40% 超出
+          const minX = -w*margin, maxX = tableRect.width - w*(1 - margin);
+          const minY = -h*margin, maxY = tableRect.height - h*(1 - margin);
+          x = Math.max(minX, Math.min(x, maxX));
+          y = Math.max(minY, Math.min(y, maxY));
+          card.style.left = x + 'px';
+          card.style.top = y + 'px';
+        };
+        const onUp = (ev) => {
+          card.releasePointerCapture(e.pointerId);
+          card.classList.remove('dragging');
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          setTimeout(() => { moving = false; }, 0);
+        };
+        window.addEventListener('pointermove', onMove, { passive: true });
+        window.addEventListener('pointerup', onUp, { passive: true });
+      });
+    }
+
+    function randomIn(min, max) { return Math.random() * (max - min) + min; }
+
+    function scatterAll() {
+      const tableRect = table.getBoundingClientRect();
+      const cards = table.querySelectorAll('.card');
+      cards.forEach((card, i) => {
+        const w = card.offsetWidth || parseFloat(getComputedStyle(card).width);
+        const h = card.offsetHeight || parseFloat(getComputedStyle(card).height);
+        const x = randomIn(-w*0.2, tableRect.width - w*0.8);
+        const y = randomIn(-h*0.2, tableRect.height - h*0.8);
+        card.style.left = x + 'px';
+        card.style.top = y + 'px';
+        card.style.setProperty('--rot', `${(Math.random()*24 - 12).toFixed(2)}deg`);
+        card.style.zIndex = (++zCounter).toString();
+      });
+    }
+
+    function stackCenter() {
+      const tableRect = table.getBoundingClientRect();
+      const centerX = tableRect.width/2 - parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--card-w'))/2;
+      const centerY = tableRect.height/2 - parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--card-h'))/2;
+      const cards = Array.from(table.querySelectorAll('.card'));
+      cards.forEach((card, i) => {
+        const offset = i * 0.12; // 微小位移形成一疊
+        card.style.left = (centerX + offset) + 'px';
+        card.style.top = (centerY - offset) + 'px';
+        card.style.setProperty('--rot', `${(-2 + (i%6)*0.4).toFixed(2)}deg`);
+        card.style.zIndex = (++zCounter).toString();
+        card.classList.add('face-down');
+      });
+    }
+
+    function init() {
+      // 建立 78 張卡片節點
+      deck.forEach((label, i) => {
+        const card = createCard(label, i);
+        table.appendChild(card);
+      });
+      countEl.textContent = deck.length;
+      // 先疊在中間，再提供散牌
+      stackCenter();
+      // 初始自動小小散開一下，避免完全重疊看不到數量
+      setTimeout(scatterAll, 100);
+    }
+
+    // 事件註冊
+    scatterBtn.addEventListener('click', scatterAll);
+    stackBtn.addEventListener('click', stackCenter);
+
+    window.addEventListener('resize', () => {
+      // 視窗改變時，避免牌跑到可視區域外，僅做一次輕微調整
+      const tableRect = table.getBoundingClientRect();
+      document.querySelectorAll('.card').forEach(card => {
+        const w = card.offsetWidth; const h = card.offsetHeight;
+        let x = parseFloat(card.style.left || '0');
+        let y = parseFloat(card.style.top || '0');
+        x = Math.min(Math.max(x, -w*0.4), tableRect.width - w*0.6);
+        y = Math.min(Math.max(y, -h*0.4), tableRect.height - h*0.6);
+        card.style.left = x + 'px';
+        card.style.top = y + 'px';
+      });
+    });
+
+    // 啟動
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
