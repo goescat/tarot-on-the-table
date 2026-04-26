@@ -267,80 +267,103 @@
     }
 
     function makeDraggable(card) {
-      let startX = 0, startY = 0;
-      let offsetX = 0, offsetY = 0;
+      let startX = 0, startY = 0, offsetX = 0, offsetY = 0, moving = false;
 
       card.addEventListener('pointerdown', (e) => {
-        if (e.button !== 0) return;
+        if (e.button !== 0) return; // 僅左鍵
         e.preventDefault();
-
         const rect = card.getBoundingClientRect();
         const tableRect = table.getBoundingClientRect();
-
-        startX = e.clientX;
-        startY = e.clientY;
-        offsetX = startX - rect.left;
-        offsetY = startY - rect.top;
-
+        startX = e.clientX; startY = e.clientY;
+        offsetX = startX - rect.left; offsetY = startY - rect.top;
         card.setPointerCapture(e.pointerId);
         card.classList.add('dragging');
         card.style.zIndex = (++zCounter).toString();
 
-        let lastX = e.clientX;
-        let lastY = e.clientY;
+        const onMove = (ev) => {
+          moving = true;
+          const w = rect.width, h = rect.height;
+          let x = ev.clientX - tableRect.left - offsetX;
+          let y = ev.clientY - tableRect.top - offsetY;
+          // 允許一點點超出邊界，避免邊緣很難拿到
+          const margin = 0.4; // 允許 40% 超出
+          const minX = -w * margin, maxX = tableRect.width - w * (1 - margin);
+          const minY = -h * margin, maxY = tableRect.height - h * (1 - margin);
+          x = Math.max(minX, Math.min(x, maxX));
+          y = Math.max(minY, Math.min(y, maxY));
+          card.style.left = x + 'px';
+          card.style.top = y + 'px';
+        };
+        const onUp = (ev) => {
+          card.releasePointerCapture(e.pointerId);
+          card.classList.remove('dragging');
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          setTimeout(() => { moving = false; }, 0);
+        };
+        window.addEventListener('pointermove', onMove, { passive: true });
+        window.addEventListener('pointerup', onUp, { passive: true });
+      });
+    }
+
+
+    function makeTableShuffleDraggable() {
+      let lastX = 0;
+      let lastY = 0;
+      let isShuffling = false;
+
+      table.addEventListener('pointerdown', (e) => {
+        // 點到牌，不啟動桌面洗牌
+        if (e.target.closest('.card')) return;
+        if (e.button !== 0) return;
+
+        e.preventDefault();
+
+        isShuffling = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
 
         const onMove = (ev) => {
+          if (!isShuffling) return;
+
           const dx = ev.clientX - lastX;
           const dy = ev.clientY - lastY;
           lastX = ev.clientX;
           lastY = ev.clientY;
 
-          // 游標附近半徑，越大一次帶動越多牌
-          const shuffleRadius = 180;
+          const tableRect = table.getBoundingClientRect();
+          const shuffleRadius = 200;
 
-          const cards = Array.from(table.querySelectorAll('.card'));
-
-          cards.forEach((c) => {
-            const cRect = c.getBoundingClientRect();
-            const cx = cRect.left + cRect.width / 2;
-            const cy = cRect.top + cRect.height / 2;
-
+          document.querySelectorAll('.card').forEach((card) => {
+            const rect = card.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
             const dist = Math.hypot(ev.clientX - cx, ev.clientY - cy);
 
             if (dist > shuffleRadius) return;
 
-            // 越靠近游標，移動越明顯
             const power = 1 - dist / shuffleRadius;
 
-            let x = parseFloat(c.style.left || '0');
-            let y = parseFloat(c.style.top || '0');
+            let x = parseFloat(card.style.left || '0');
+            let y = parseFloat(card.style.top || '0');
 
-            // 被直接按住的那張跟著游標走
-            if (c === card) {
-              x = ev.clientX - tableRect.left - offsetX;
-              y = ev.clientY - tableRect.top - offsetY;
-            } else {
-              // 附近的牌被拖曳方向帶動，並加一點亂數，像洗牌
-              x += dx * power * 1.4 + randomIn(-3, 3) * power;
-              y += dy * power * 1.4 + randomIn(-3, 3) * power;
+            x += dx * power * 1.5 + randomIn(-4, 4) * power;
+            y += dy * power * 1.5 + randomIn(-4, 4) * power;
 
-              const currentRot = parseFloat(
-                c.style.getPropertyValue('--rot').replace('deg', '')
-              ) || 0;
+            const currentRot =
+              parseFloat(card.style.getPropertyValue('--rot').replace('deg', '')) || 0;
 
-              c.style.setProperty(
-                '--rot',
-                `${currentRot + randomIn(-2, 2) * power}deg`
-              );
+            card.style.setProperty(
+              '--rot',
+              `${currentRot + randomIn(-2.5, 2.5) * power}deg`
+            );
 
-              // 偶爾把附近的牌提到上層，增加洗牌感
-              if (Math.random() < 0.08 * power) {
-                c.style.zIndex = (++zCounter).toString();
-              }
+            if (Math.random() < 0.08 * power) {
+              card.style.zIndex = (++zCounter).toString();
             }
 
-            const w = cRect.width;
-            const h = cRect.height;
+            const w = rect.width;
+            const h = rect.height;
             const margin = 0.4;
 
             const minX = -w * margin;
@@ -348,17 +371,13 @@
             const minY = -h * margin;
             const maxY = tableRect.height - h * (1 - margin);
 
-            x = Math.max(minX, Math.min(x, maxX));
-            y = Math.max(minY, Math.min(y, maxY));
-
-            c.style.left = x + 'px';
-            c.style.top = y + 'px';
+            card.style.left = Math.max(minX, Math.min(x, maxX)) + 'px';
+            card.style.top = Math.max(minY, Math.min(y, maxY)) + 'px';
           });
         };
 
         const onUp = () => {
-          card.releasePointerCapture(e.pointerId);
-          card.classList.remove('dragging');
+          isShuffling = false;
           window.removeEventListener('pointermove', onMove);
           window.removeEventListener('pointerup', onUp);
         };
@@ -389,9 +408,18 @@
       const tableRect = table.getBoundingClientRect();
       const centerX = tableRect.width / 2 - parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--card-w')) / 2;
       const centerY = tableRect.height / 2 - parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--card-h')) / 2;
-      const cards = Array.from(table.querySelectorAll('.card'));
+
+      let cards = Array.from(table.querySelectorAll('.card'));
+
+      // === 加這段：隨機排序 (Fisher-Yates shuffle) ===
+      for (let i = cards.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [cards[i], cards[j]] = [cards[j], cards[i]];
+      }
+
       cards.forEach((card, i) => {
-        const offset = i * 0.12; // 微小位移形成一疊
+        const offset = i * 0.12;
+
         card.style.left = (centerX + offset) + 'px';
         card.style.top = (centerY - offset) + 'px';
         card.style.setProperty('--rot', `${(-2 + (i % 6) * 0.4).toFixed(2)}deg`);
@@ -401,16 +429,17 @@
     }
 
     function init() {
-      // 建立 78 張卡片節點
       deck.forEach((label, i) => {
         const card = createCard(label, i);
         table.appendChild(card);
       });
+
       countEl.textContent = deck.length;
-      // 先疊在中間，再提供散牌
       stackCenter();
-      // 初始自動小小散開一下，避免完全重疊看不到數量
+
       setTimeout(scatterAll, 100);
+
+      makeTableShuffleDraggable();
     }
 
     // 事件註冊
