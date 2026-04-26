@@ -1,3 +1,9 @@
-# goescat.github.io
+# tarot-on-the-table
 
-https://goescat.github.io/
+## 像是放在桌上的塔羅抽牌🌹
+
+🪄在沒有牌的地方拖曳是大範圍洗牌，對單張牌拖曳就是移動單張牌。
+
+👉點兩下可以翻牌。
+
+希望你喜歡✨
